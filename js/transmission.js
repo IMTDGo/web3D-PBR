@@ -106,11 +106,16 @@ export function setupMaterialChannels(material) {
 export function onBaseColorLoaded(material) {
     if (!material) return;
 
-    // 邏輯：預設讀取 BaseColor Alpha
-    // 設定 transparent 為 true 以啟用 alpha blending
+    // M10 修正：若目前是玻璃模式 (IOR>1 且已有 transmission)，保持其態，
+    // 不要強制覆寫 transparent/opacity/transmission 而破壞玻璃設定。
+    const isGlassMode = material.ior > 1.0 && material.transmission > 0;
+    if (isGlassMode) {
+        material.needsUpdate = true;
+        return;
+    }
+
+    // 還原為傳統透明模式 (Alpha blending) 的預設
     material.transparent = true;
-    
-    // 重置 Opacity 為 1.0，Transmission 為 0 (預設不啟用玻璃)
     material.opacity = 1.0;
     material.transmission = 0.0;
     material.needsUpdate = true;

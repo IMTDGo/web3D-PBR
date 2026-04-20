@@ -55,7 +55,9 @@ function setupLight(type) {
         new THREE.Color(data.color).getHex(),
         data.intensity * (type === 'top' ? 1.5 : 0.5)
     );
-    shadowLight.castShadow = true;
+    // 初始值依 UI (shadowsEnabled) 狀態決定，於 init() 同步
+    const shadowsCheckbox = document.getElementById('shadowsEnabled');
+    shadowLight.castShadow = shadowsCheckbox ? shadowsCheckbox.checked : false;
     const size = 1024; // 預設品質 Low
     shadowLight.shadow.mapSize.width = size;
     shadowLight.shadow.mapSize.height = size;
@@ -210,27 +212,21 @@ export function toggleShadows(enabled) {
 
 export function updateShadowQuality(quality) {
     let size = quality === 'low' ? 1024 : (quality === 'high' ? 4096 : 2048);
-    if (appState.shadowTopLight) {
-        appState.shadowTopLight.shadow.mapSize.width = size;
-        appState.shadowTopLight.shadow.mapSize.height = size;
-        appState.shadowTopLight.shadow.map = null;
-    }
+    // H8 修正：釋放舊的 shadow RenderTarget，避免 VRAM 洩漏
+    const resetShadowMap = (light, s) => {
+        if (!light) return;
+        light.shadow.mapSize.width = s;
+        light.shadow.mapSize.height = s;
+        if (light.shadow.map) {
+            light.shadow.map.dispose();
+            light.shadow.map = null;
+        }
+    };
+    resetShadowMap(appState.shadowTopLight, size);
     const lowerSize = Math.max(1024, size / 2);
-    if (appState.shadowLeftLight) {
-        appState.shadowLeftLight.shadow.mapSize.width = lowerSize;
-        appState.shadowLeftLight.shadow.mapSize.height = lowerSize;
-        appState.shadowLeftLight.shadow.map = null;
-    }
-    if (appState.shadowRightLight) {
-        appState.shadowRightLight.shadow.mapSize.width = lowerSize;
-        appState.shadowRightLight.shadow.mapSize.height = lowerSize;
-        appState.shadowRightLight.shadow.map = null;
-    }
-    if (appState.shadowSubLight) {
-        appState.shadowSubLight.shadow.mapSize.width = lowerSize;
-        appState.shadowSubLight.shadow.mapSize.height = lowerSize;
-        appState.shadowSubLight.shadow.map = null;
-    }
+    resetShadowMap(appState.shadowLeftLight, lowerSize);
+    resetShadowMap(appState.shadowRightLight, lowerSize);
+    resetShadowMap(appState.shadowSubLight, lowerSize);
 }
 
 export function updateShadowSoftness(softness) {
@@ -258,9 +254,15 @@ export function setupLightUIEvents() {
         if (isMiddleMouseDown) {
             const deltaX = e.clientX - previousMousePosition.x;
             appState.lightPivot.rotation.y += deltaX * 0.01;
-            if (appState.scene.environment) appState.scene.environment.rotation = appState.lightPivot.rotation.y;
-            ['top', 'left', 'right', 'sub'].forEach(type => syncLightDataFromTransform(type));
+            appState.lightPivotRotationY = appState.lightPivot.rotation.y;
+            // C6 修正：Texture.rotation 是 UV 旋轉，對 PBR env 取樣無效。
+            // 正確做法是使用 scene.environmentRotation (Euler)。
+            appState.scene.environmentRotation.y = appState.lightPivot.rotation.y;
+            appState.scene.backgroundRotation.y = appState.lightPivot.rotation.y;
+            // C7 修正：pivot 旋轉不會改變子光源 local transform，
+            // 不再呼叫 syncLightDataFromTransform，避免 UI 與內部資料失準。
             previousMousePosition = { x: e.clientX, y: e.clientY };
+            appState.needsRender = true;
         }
     };
     appState.renderer.domElement.removeEventListener('mousemove', handleMouseMove);

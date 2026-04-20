@@ -37,6 +37,23 @@ export function selectMaterial(event) {
     }
 }
 
+// 拖曳偵測：記錄 mousedown 位置，放開時若位移超過閾值則不觸發選取
+let _mouseDownX = 0;
+let _mouseDownY = 0;
+const DRAG_THRESHOLD_SQ = 16; // 4px 以上視為拖曳
+
+function _onViewportMouseDown(e) {
+    _mouseDownX = e.clientX;
+    _mouseDownY = e.clientY;
+}
+
+function _onViewportClickGuarded(e) {
+    const dx = e.clientX - _mouseDownX;
+    const dy = e.clientY - _mouseDownY;
+    if (dx * dx + dy * dy > DRAG_THRESHOLD_SQ) return; // 拖曳後不選取
+    onViewportClick(e);
+}
+
 export function onViewportClick(event) {
     const rect = appState.renderer.domElement.getBoundingClientRect();
     appState.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -59,30 +76,65 @@ export function onViewportClick(event) {
 }
 
 export function highlightMaterial(material) {
-    const originalEmissive = material.emissive.clone();
-    const originalEmissiveIntensity = material.emissiveIntensity;
+    // H6 修正：使用 userData 管理每個材質的 timeout，
+    // 避免使用者在 500ms 內編輯 emissive 時被覆蓋。
+    if (material.userData._highlightTimeout) {
+        clearTimeout(material.userData._highlightTimeout);
+    } else {
+        // 僅在首次高亮時備份原值
+        material.userData._highlightOrigEmissive = material.emissive.clone();
+        material.userData._highlightOrigIntensity = material.emissiveIntensity;
+    }
     material.emissive.set(0x4a9eff);
     material.emissiveIntensity = 0.3;
-    setTimeout(() => {
-        material.emissive.copy(originalEmissive);
-        material.emissiveIntensity = originalEmissiveIntensity;
+    material.userData._highlightTimeout = setTimeout(() => {
+        material.emissive.copy(material.userData._highlightOrigEmissive);
+        material.emissiveIntensity = material.userData._highlightOrigIntensity;
+        material.userData._highlightTimeout = null;
     }, 500);
 }
 
 export function updateUIFromMaterial() {
     if (!appState.currentMaterial) return;
-    // ⬇️ 完整替換為以下 2 行 ⬇️
-    updateSlider('roughness', appState.currentMaterial.roughness || 0.5);
-    updateSlider('metallic', appState.currentMaterial.metalness || 0);
-    // ⬆️ 替換結束 ⬆️
-    setupMaterialChannels(appState.currentMaterial);
+    const mat = appState.currentMaterial;
+    // H1 修正：完整同步所有材質控制項，避免切換材質後 UI 顯示舊數值
+    updateSlider('roughness', mat.roughness ?? 0.5);
+    updateSlider('metallic', mat.metalness ?? 0);
+    const ns = (mat.normalMap && mat.normalScale) ? mat.normalScale.x : 1;
+    updateSlider('normalScale', ns);
+    updateSlider('aoIntensity', mat.aoMapIntensity ?? 1);
+    updateSlider('lightMapIntensity', mat.lightMapIntensity ?? 1);
+    updateSlider('emissiveIntensity', mat.emissiveIntensity ?? 1);
+    updateSlider('sheen', mat.sheen ?? 0);
+    updateSlider('sheenRoughness', mat.sheenRoughness ?? 1);
+    updateSlider('clearcoat', mat.clearcoat ?? 0);
+    updateSlider('clearcoatRoughness', mat.clearcoatRoughness ?? 0);
+    updateSlider('anisotropy', mat.anisotropy ?? 0);
+    // anisotropyRotation 用自定義卡格 (角度)
+    const rotSlider = document.getElementById('anisotropyRotation');
+    const rotVal = document.getElementById('anisotropyRotationVal');
+    if (rotSlider) rotSlider.value = appState.anisotropyRotation;
+    if (rotVal) rotVal.textContent = appState.anisotropyRotation.toFixed(0) + '°';
+    // 顏色選擇器
+    const setColor = (id, col) => {
+        const el = document.getElementById(id);
+        if (el && col) el.value = '#' + col.getHexString();
+    };
+    setColor('baseColor', mat.color);
+    setColor('emissiveColor', mat.emissive);
+    setColor('sheenColor', mat.sheenColor);
+    setupMaterialChannels(mat);
     updateSSSUIFromMaterial();
     updateUVEditorFromMaterial();
 }
 
 export function updateMaterial(property, value) {
     if (!appState.currentMaterial) return;
-    document.getElementById(property + 'Val').textContent = value.toFixed(2);
+    // M3 修正：anisotropyRotation 使用度號格式，其他才用 toFixed(2)，避免 label 闃爐
+    if (property !== 'anisotropyRotation') {
+        const valEl = document.getElementById(property + 'Val');
+        if (valEl) valEl.textContent = value.toFixed(2);
+    }
     
     // 🚀 效能優化：批量更新屬性，避免多次 needsUpdate
     let needsUpdate = false;
@@ -217,7 +269,12 @@ export function loadTexture(file, mapName) {
             }
             
             appState.currentMaterial.needsUpdate = true;
-            updateUVEditorFromMaterial();
+            // H7 修正：該呼叫 updateUVs() 同步 offset/rotation/scaleY，
+            // 使新貼圖與其他通道一致；動態 import 避免循環依賴
+            import('./uv-editor.js').then(m => {
+                if (m.updateUVs) m.updateUVs();
+                m.updateUVEditorFromMaterial();
+            });
             updateTexturePreview(mapName, texture);
         };
         img.src = e.target.result;
@@ -314,7 +371,7 @@ export function resetBatchAdjustments() {
         mat.color.copy(originalData.color);
         mat.roughness = originalData.roughness;
         mat.metalness = originalData.metalness;
-        if (mat.normalMap) mat.normalScale.copy(originalData.normalScale);
+        if (mat.normalMap && originalData.normalScale) mat.normalScale.copy(originalData.normalScale);
         mat.needsUpdate = true;
     });
     
@@ -372,6 +429,8 @@ export function updateAnisotropyTexture() {
     ctx.putImageData(imageData, 0, 0);
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    // 🚀 VRAM 優化：釋放舊的 anisotropyMap，避免每次滑動都洩漏紋理
+    if (appState.currentMaterial.anisotropyMap) appState.currentMaterial.anisotropyMap.dispose();
     appState.currentMaterial.anisotropyMap = texture;
     appState.currentMaterial.needsUpdate = true;
 }
@@ -420,7 +479,9 @@ export function setupMaterialUIEvents() {
     // ⬆️ 替換結束 ⬆️
 
     // ⬇️ 完整替換為以下 2 行 ⬇️
-    appState.renderer.domElement.removeEventListener('click', onViewportClick);
-    appState.renderer.domElement.addEventListener('click', onViewportClick);
+    appState.renderer.domElement.removeEventListener('mousedown', _onViewportMouseDown);
+    appState.renderer.domElement.removeEventListener('click', _onViewportClickGuarded);
+    appState.renderer.domElement.addEventListener('mousedown', _onViewportMouseDown);
+    appState.renderer.domElement.addEventListener('click', _onViewportClickGuarded);
     // ⬆️ 替換結束 ⬆️
 }

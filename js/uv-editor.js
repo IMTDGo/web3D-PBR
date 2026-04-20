@@ -1,13 +1,21 @@
 import * as THREE from 'three';
 import { appState } from './state.js';
 
-const seamlessUniforms = {
-    seamlessOffsetX: { value: 0.5 },
-    seamlessOffsetY: { value: 0.5 },
-    seamlessScale: { value: 1.0 },
-    seamlessBlendStrength: { value: 1.0 },
-    seamlessBlendWidth: { value: 0.15 }
-};
+// H9 修正：不再共用一個模組層級 uniforms，
+// 而是為每個材質在 userData 內建立專屬 uniforms，
+// 避免調整一個材質連帶改變其他材質的 seamless 設定。
+function getSeamlessUniforms(material) {
+    if (!material.userData.seamlessUniforms) {
+        material.userData.seamlessUniforms = {
+            seamlessOffsetX: { value: 0.5 },
+            seamlessOffsetY: { value: 0.5 },
+            seamlessScale: { value: 1.0 },
+            seamlessBlendStrength: { value: 1.0 },
+            seamlessBlendWidth: { value: 0.15 }
+        };
+    }
+    return material.userData.seamlessUniforms;
+}
 
 export function setupUVEditorUI() {
     // UI is now static in HTML
@@ -81,8 +89,10 @@ export function updateUVEditorFromMaterial() {
 }
 
 function updateSeamlessUniforms() {
-    seamlessUniforms.seamlessBlendStrength.value = parseFloat(document.getElementById('seamlessBlendStrength').value);
-    seamlessUniforms.seamlessBlendWidth.value = parseFloat(document.getElementById('seamlessBlendWidth').value);
+    if (!appState.currentMaterial) return;
+    const u = getSeamlessUniforms(appState.currentMaterial);
+    u.seamlessBlendStrength.value = parseFloat(document.getElementById('seamlessBlendStrength').value);
+    u.seamlessBlendWidth.value = parseFloat(document.getElementById('seamlessBlendWidth').value);
     // Uniforms are updated by reference, no need to recompile shader
 }
 
@@ -92,12 +102,13 @@ function updateSeamlessShader() {
     
     if (enabled) {
         appState.currentMaterial.userData.isSeamless = true;
+        const u = getSeamlessUniforms(appState.currentMaterial);
         appState.currentMaterial.onBeforeCompile = (shader) => {
-            shader.uniforms.seamlessOffsetX = seamlessUniforms.seamlessOffsetX;
-            shader.uniforms.seamlessOffsetY = seamlessUniforms.seamlessOffsetY;
-            shader.uniforms.seamlessScale = seamlessUniforms.seamlessScale;
-            shader.uniforms.seamlessBlendStrength = seamlessUniforms.seamlessBlendStrength;
-            shader.uniforms.seamlessBlendWidth = seamlessUniforms.seamlessBlendWidth;
+            shader.uniforms.seamlessOffsetX = u.seamlessOffsetX;
+            shader.uniforms.seamlessOffsetY = u.seamlessOffsetY;
+            shader.uniforms.seamlessScale = u.seamlessScale;
+            shader.uniforms.seamlessBlendStrength = u.seamlessBlendStrength;
+            shader.uniforms.seamlessBlendWidth = u.seamlessBlendWidth;
 
             // Inject uniform declarations
             shader.fragmentShader = shader.fragmentShader.replace(
@@ -198,18 +209,18 @@ function updateSeamlessShader() {
             );
         };
     } else {
-        // ⬇️ 完整替換為以下 3 行 ⬇️
+        // H10 修正：將 customProgramCacheKey 一併刪除，
+        // 避免回歸後所有材質因空 cache key 共用 shader program。
         delete appState.currentMaterial.userData.isSeamless;
         delete appState.currentMaterial.onBeforeCompile;
-        appState.currentMaterial.customProgramCacheKey = () => '';
-        // ⬆️ 替換結束 ⬆️
+        delete appState.currentMaterial.customProgramCacheKey;
     }
     
     appState.currentMaterial.needsUpdate = true;
     updateSeamlessUniforms(); // Ensure uniforms are set
 }
 
-function updateUVs() {
+export function updateUVs() {
     if (!appState.currentMaterial) return;
 
     const scaleX = parseFloat(document.getElementById('uvScaleX').value);

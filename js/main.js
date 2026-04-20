@@ -28,14 +28,12 @@ function init() {
     appState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     appState.renderer.toneMappingExposure = 1.0;
     appState.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    appState.renderer.physicallyCorrectLights = true;
     appState.renderer.shadowMap.autoUpdate = false; // 優化：關閉陰影自動更新，僅在需要時更新
 
     document.getElementById('viewport').appendChild(appState.renderer.domElement);
 
     appState.controls = new OrbitControls(appState.camera, appState.renderer.domElement);
-    appState.controls.enableDamping = true;
-    appState.controls.dampingFactor = 0.05;
+    appState.controls.enableDamping = false; // 不使用任何阻尼，滑鼠移動直接對應畫面
     appState.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: null, RIGHT: THREE.MOUSE.PAN };
 
     createGrid();
@@ -44,15 +42,30 @@ function init() {
     // 初始化陰影濃度 (同步模型自身陰影)
     const initialShadowOpacity = parseFloat(document.getElementById('shadowOpacity').value);
     updateModelShadowIntensity(initialShadowOpacity);
+
+    // C2/C3 修正：初始時同步 UI checkbox 與內部狀態，避免 AO/陰影 與 UI 不一致
+    const shadowsCheckbox = document.getElementById('shadowsEnabled');
+    if (shadowsCheckbox) {
+        const enabled = shadowsCheckbox.checked;
+        if (appState.shadowTopLight) appState.shadowTopLight.castShadow = enabled;
+        if (appState.shadowLeftLight) appState.shadowLeftLight.castShadow = enabled;
+        if (appState.shadowRightLight) appState.shadowRightLight.castShadow = enabled;
+        if (appState.shadowSubLight) appState.shadowSubLight.castShadow = enabled;
+    }
+    const aoCheckbox = document.getElementById('aoEnabled');
+    if (aoCheckbox) appState.aoEnabled = aoCheckbox.checked;
+
     setupPostProcessing();
     setupEventListeners();
 
     // --- 優化核心：按需渲染 (Render on Demand) ---
     appState.needsRender = true; // 初始渲染
-    // 監聽所有 UI 操作，一旦有變動就請求渲染一幀
-    document.body.addEventListener('input', () => { appState.needsRender = true; });
-    document.body.addEventListener('change', () => { appState.needsRender = true; });
-    document.body.addEventListener('click', () => { appState.needsRender = true; });
+    // M2 修正：僅監聽 sidebar (UI) 區域的互動，避免對無關互動觸發 shadowMap 更新
+    const sidebar = document.querySelector('aside') || document.body;
+    const requestRender = () => { appState.needsRender = true; };
+    sidebar.addEventListener('input', requestRender);
+    sidebar.addEventListener('change', requestRender);
+    sidebar.addEventListener('click', requestRender);
     
     animate();
 }
@@ -68,28 +81,35 @@ function setupEventListeners() {
     
     appState.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('resize', onWindowResize);
+
+    // 用 pointerdown/up 追蹤拖曳狀態，供 animate 判斷是否需要渲染
+    appState.renderer.domElement.addEventListener('pointerdown', () => { appState.isDragging = true; });
+    window.addEventListener('pointerup', () => { appState.isDragging = false; appState.needsRender = true; });
+
+    // 滾輪縮放：每次滾動觸發一幀渲染
+    appState.renderer.domElement.addEventListener('wheel', () => { appState.needsRender = true; }, { passive: true });
 }
 
 function animate() {
     requestAnimationFrame(animate);
-    
-    // controls.update() 回傳 true 代表攝影機還在移動 (例如阻尼滑動中)
-    const controlsChanged = appState.controls.update();
 
-    // 優化：只有在 UI 操作或場景變動 (needsRender=true) 時才更新陰影
-    // 單純旋轉攝影機 (controlsChanged) 時，使用快取的陰影貼圖，大幅提升 FPS
-    if (appState.needsRender) {
-        appState.renderer.shadowMap.needsUpdate = true;
-    }
+    // 拖曳中（isDragging）每幀都渲染；其他情況只在 needsRender 時渲染一幀
+    const shouldRender = appState.isDragging || appState.needsRender;
 
-    // 只有在 "攝影機移動" 或 "UI改變(needsRender)" 時才進行渲染
-    if (controlsChanged || appState.needsRender) {
+    if (shouldRender) {
+        // controls.update() 必須在渲染前呼叫以同步攝影機狀態
+        appState.controls.update();
+
+        if (appState.needsRender) {
+            appState.renderer.shadowMap.needsUpdate = true;
+        }
+
         if (appState.composer) {
             appState.composer.render();
         } else {
             appState.renderer.render(appState.scene, appState.camera);
         }
-        appState.needsRender = false; // 渲染完畢，重置標記
+        appState.needsRender = false;
     }
 }
 

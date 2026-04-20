@@ -5,7 +5,17 @@ import { appState } from './state.js';
 
 export function createGrid(size = 20) {
     // 移除舊的網格與陰影平面，防止疊加
-    if (appState.gridHelper) appState.scene.remove(appState.gridHelper);
+    if (appState.gridHelper) {
+        // H5 修正：將舊 GridHelper 的 geometry/material 全部 dispose，避免 GPU 資源洩漏
+        appState.gridHelper.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+                const mats = Array.isArray(child.material) ? child.material : [child.material];
+                mats.forEach(m => m.dispose());
+            }
+        });
+        appState.scene.remove(appState.gridHelper);
+    }
     if (appState.groundPlane) {
         appState.scene.remove(appState.groundPlane);
         if (appState.groundPlane.geometry) appState.groundPlane.geometry.dispose();
@@ -132,9 +142,13 @@ export function createGroundReflection() {
 export function updateGroundReflection() {
     if (!appState.groundMirror) return;
     
-    const strength = parseFloat(document.getElementById('reflectionStrength').value);
-    const start = parseFloat(document.getElementById('reflectionFadeStart').value);
-    const end = parseFloat(document.getElementById('reflectionFadeEnd').value);
+    const strengthEl = document.getElementById('reflectionStrength');
+    const startEl = document.getElementById('reflectionFadeStart');
+    const endEl = document.getElementById('reflectionFadeEnd');
+    if (!strengthEl || !startEl || !endEl) return;
+    const strength = parseFloat(strengthEl.value);
+    const start = parseFloat(startEl.value);
+    const end = parseFloat(endEl.value);
     
     // 更新我們注入的 opacity uniform
     if (appState.groundMirror.material && appState.groundMirror.material.uniforms.opacity) {
@@ -152,6 +166,11 @@ export function toggleGroundReflection(enabled) {
 
 export async function loadHDRI(hdriName) {
     if (hdriName === 'gradient') {
+        // M5 修正：切回 gradient 時，釋放舊的 HDRI texture 以釋放 VRAM
+        if (appState.currentHDRI) {
+            appState.currentHDRI.dispose();
+            appState.currentHDRI = null;
+        }
         updateHDR();
         return;
     }
@@ -261,6 +280,9 @@ export function updateHDR() {
         appState.materials.forEach(matInfo => matInfo.material.envMapIntensity = 0);
     }
     
+    // H2 修正：釋放臨時 sphere 資源，避免每次更新 HDR 都洩漏 geometry/material
+    skyGeo.dispose();
+    skyMat.dispose();
     pmremGenerator.dispose();
 }
 
@@ -292,18 +314,26 @@ export function setupEnvironmentUIEvents() {
     document.getElementById('hdrGroundColor').addEventListener('input', updateHDR);
     document.getElementById('hdriSelect').addEventListener('change', (e) => loadHDRI(e.target.value));
 
-    // Ground Reflection
-    document.getElementById('groundReflectionEnabled').addEventListener('change', (e) => {
-        toggleGroundReflection(e.target.checked);
-        document.getElementById('groundReflectionControls').style.display = e.target.checked ? 'block' : 'none';
-    });
-    document.getElementById('reflectionStrength').addEventListener('input', (e) => { document.getElementById('reflectionStrengthVal').textContent = parseFloat(e.target.value).toFixed(2); updateGroundReflection(); });
-    document.getElementById('reflectionFadeStart').addEventListener('input', (e) => {
-        document.getElementById('reflectionFadeStartVal').textContent = parseFloat(e.target.value).toFixed(2);
-        updateGroundReflection();
-    });
-    document.getElementById('reflectionFadeEnd').addEventListener('input', (e) => {
-        document.getElementById('reflectionFadeEndVal').textContent = parseFloat(e.target.value).toFixed(2);
-        updateGroundReflection();
-    });
+    // Ground Reflection （目前 UI 已移除，隐藏元素仍存在以避免 JS 錯誤）
+    // C4 修正：一律 null-guard，避免對不存在的 Val/Controls 元素寫入屬性
+    const groundRefEnabled = document.getElementById('groundReflectionEnabled');
+    if (groundRefEnabled) {
+        groundRefEnabled.addEventListener('change', (e) => {
+            toggleGroundReflection(e.target.checked);
+            const ctrl = document.getElementById('groundReflectionControls');
+            if (ctrl) ctrl.style.display = e.target.checked ? 'block' : 'none';
+        });
+    }
+    const addReflectListener = (inputId, valId) => {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        input.addEventListener('input', (e) => {
+            const val = document.getElementById(valId);
+            if (val) val.textContent = parseFloat(e.target.value).toFixed(2);
+            updateGroundReflection();
+        });
+    };
+    addReflectListener('reflectionStrength', 'reflectionStrengthVal');
+    addReflectListener('reflectionFadeStart', 'reflectionFadeStartVal');
+    addReflectListener('reflectionFadeEnd', 'reflectionFadeEndVal');
 }
