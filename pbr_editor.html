@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-TW" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FBX PBR 材質編輯器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.2/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <style>
+        body { overflow: hidden; }
+        /* 自定義捲軸 */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    </style>
+</head>
+<body>
+    <div id="container" class="flex h-screen w-full bg-base-300 text-base-content">
+        <main id="viewport" class="flex-1 relative">
+            <div id="loading" class="hidden absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 px-10 py-5 rounded-lg z-50 text-white font-bold shadow-xl">載入中...</div>
+            <div id="controls-info" class="absolute bottom-2 left-2 bg-black/70 p-3 rounded-md text-[11px] leading-relaxed pointer-events-none select-none text-gray-200">
+                <div><strong>操作說明：</strong></div>
+                <div>左鍵拖曳：旋轉視角</div>
+                <div>右鍵拖曳：平移視角</div>
+                <div>滾輪：縮放視角</div>
+                <div>中鍵拖曳：旋轉燈光</div>
+            </div>
+        </main>
+        <aside id="sidebar" class="w-80 flex-none bg-base-200 overflow-y-auto p-4 border-l border-base-300">
+            <!-- 🚀 VRAM 優化提示 -->
+            <div class="alert alert-success shadow-sm mb-3 py-2 px-3 text-xs">
+                <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-4 w-4" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span><strong>效能優化已啟用</strong><br/>貼圖自動縮放 ≤2048px<br/>後期處理降解析度 75%</span>
+            </div>
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" checked />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">檔案上傳</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full pt-2">
+                        <label class="label py-1" for="fbxUpload"><span class="label-text text-xs">FBX 模型</span></label>
+                        <input type="file" id="fbxUpload" accept=".fbx" class="file-input file-input-bordered file-input-primary file-input-sm w-full">
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">視圖設定</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-2 pt-2">
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="showGrid" class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">顯示網格</span>
+                        </label>
+                    </div>
+                    <div class="form-control w-full mb-2">
+                        <label class="label py-1" for="gridSize"><span class="label-text text-xs">網格大小</span><span class="label-text-alt text-primary" id="gridSizeVal">20</span></label>
+                        <input type="range" id="gridSize" min="5" max="50" step="5" value="20" class="range range-primary range-xs">
+                    </div>
+                    <div class="form-control w-full">
+                        <label class="label py-1" for="backgroundColor"><span class="label-text text-xs">背景顏色</span></label>
+                        <input type="color" id="backgroundColor" value="#ffffff" class="input input-bordered p-0 h-8 w-full cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" checked />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">材質選擇</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full pt-2">
+                        <select id="materialSelect" class="select select-bordered select-sm w-full text-xs">
+                            <option value="">請先載入模型</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">UV 編輯 (UV Editor)</div>
+                <div class="collapse-content">
+                    
+                    <!-- UV Move -->
+                    <div class="divider text-xs font-bold my-1">UV 移動 (Move)</div>
+                    <div class="form-control w-full mb-1">
+                        <label class="label py-0" for="uvOffsetX"><span class="label-text text-xs">X 偏移 (Offset X)</span><span class="label-text-alt text-primary" id="uvOffsetXVal">0.00</span></label>
+                        <input type="range" id="uvOffsetX" min="-1" max="1" step="0.01" value="0" class="range range-primary range-xs">
+                    </div>
+                    <div class="form-control w-full mb-1">
+                        <label class="label py-0" for="uvOffsetY"><span class="label-text text-xs">Y 偏移 (Offset Y)</span><span class="label-text-alt text-primary" id="uvOffsetYVal">0.00</span></label>
+                        <input type="range" id="uvOffsetY" min="-1" max="1" step="0.01" value="0" class="range range-primary range-xs">
+                    </div>
+
+                    <!-- UV Rotation -->
+                    <div class="divider text-xs font-bold my-1">UV 旋轉 (Rotation)</div>
+                    <div class="form-control w-full mb-1">
+                        <label class="label py-0" for="uvRotation"><span class="label-text text-xs">旋轉 (Rotation)</span><span class="label-text-alt text-primary" id="uvRotationVal">0°</span></label>
+                        <input type="range" id="uvRotation" min="-180" max="180" step="1" value="0" class="range range-primary range-xs">
+                    </div>
+
+                    <!-- UV Scale -->
+                    <div class="divider text-xs font-bold my-1">UV 縮放 (Scale)</div>
+                    <div class="form-control w-full mb-1">
+                        <label class="label py-0" for="uvScaleUniform"><span class="label-text text-xs">整體縮放 (Uniform)</span><span class="label-text-alt text-primary" id="uvScaleUniformVal">1.00</span></label>
+                        <input type="range" id="uvScaleUniform" min="0" max="30" step="0.05" value="1.0" class="range range-primary range-xs">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="form-control w-full mb-1">
+                            <label class="label py-0" for="uvScaleX"><span class="label-text text-xs">X 縮放</span><span class="label-text-alt text-primary" id="uvScaleXVal">1.00</span></label>
+                            <input type="range" id="uvScaleX" min="0.1" max="30" step="0.05" value="1.0" class="range range-primary range-xs">
+                        </div>
+                        <div class="form-control w-full mb-1">
+                            <label class="label py-0" for="uvScaleY"><span class="label-text text-xs">Y 縮放</span><span class="label-text-alt text-primary" id="uvScaleYVal">1.00</span></label>
+                            <input type="range" id="uvScaleY" min="0.1" max="30" step="0.05" value="1.0" class="range range-primary range-xs">
+                        </div>
+                    </div>
+
+                    <!-- Seamless -->
+                    <div class="divider text-xs font-bold my-1">四方連續 (Seamless)</div>
+                    <div class="form-control w-full pt-1">
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="enableSeamless" class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">啟用四方連續 (Seamless Blending)</span>
+                        </label>
+                    </div>
+
+                    <div id="seamlessControls" style="display:none;" class="pl-2 border-l-2 border-primary/20 mt-2">
+                        <div class="form-control w-full mt-1">
+                            <label class="label py-0" for="seamlessBlendStrength"><span class="label-text text-[10px]">混合強度 (Blend Strength)</span><span class="label-text-alt text-primary" id="seamlessBlendStrengthVal">1.00</span></label>
+                            <input type="range" id="seamlessBlendStrength" min="0" max="1" step="0.01" value="1.0" class="range range-primary range-xs">
+                        </div>
+                        <div class="form-control w-full mt-1">
+                            <label class="label py-0" for="seamlessBlendWidth"><span class="label-text text-[10px]">混合區域寬度 (Blend Width)</span><span class="label-text-alt text-primary" id="seamlessBlendWidthVal">0.15</span></label>
+                            <input type="range" id="seamlessBlendWidth" min="0.05" max="0.4" step="0.01" value="0.15" class="range range-primary range-xs">
+                        </div>
+                    </div>
+                    
+                    <div class="form-control w-full mt-3">
+                        <button id="resetUVBtn" class="btn btn-sm btn-neutral w-full">重置 UV 設定</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" checked />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">基礎材質</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-3 pt-2">
+                        <label class="label py-1"><span class="label-text text-xs">Base Color / Diffuse</span></label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <div id="preview-map" class="w-16 h-16 border-2 border-dashed border-base-content/20 rounded bg-base-200 flex items-center justify-center overflow-hidden shrink-0 text-xs text-base-content/50">
+                                <span>無</span>
+                            </div>
+                            <div class="flex flex-col gap-1 flex-1">
+                                <input type="file" id="baseColorMap" accept="image/*" class="file-input file-input-bordered file-input-xs w-full">
+                                <button onclick="clearTexture('map')" class="btn btn-xs btn-outline w-full">清除</button>
+                            </div>
+                        </div>
+                        <input type="color" id="baseColor" value="#ffffff" class="input input-bordered p-0 h-8 w-full cursor-pointer">
+                    </div>
+
+                    <div class="form-control w-full mb-3">
+                        <label class="label py-1"><span class="label-text text-xs">Roughness</span><span class="label-text-alt text-primary" id="roughnessVal">0.5</span></label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <div id="preview-roughnessMap" class="w-16 h-16 border-2 border-dashed border-base-content/20 rounded bg-base-200 flex items-center justify-center overflow-hidden shrink-0 text-xs text-base-content/50"><span>無</span></div>
+                            <div class="flex flex-col gap-1 flex-1">
+                                <input type="file" id="roughnessMap" accept="image/*" class="file-input file-input-bordered file-input-xs w-full">
+                                <button onclick="clearTexture('roughnessMap')" class="btn btn-xs btn-outline w-full">清除</button>
+                            </div>
+                        </div>
+                        <input type="range" id="roughness" min="0" max="1.5" step="0.01" value="0.5" class="range range-primary range-xs">
+                    </div>
+
+                    <div class="form-control w-full">
+                        <label class="label py-1"><span class="label-text text-xs">Metallic</span><span class="label-text-alt text-primary" id="metallicVal">0.0</span></label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <div id="preview-metalnessMap" class="w-16 h-16 border-2 border-dashed border-base-content/20 rounded bg-base-200 flex items-center justify-center overflow-hidden shrink-0 text-xs text-base-content/50"><span>無</span></div>
+                            <div class="flex flex-col gap-1 flex-1">
+                                <input type="file" id="metalnessMap" accept="image/*" class="file-input file-input-bordered file-input-xs w-full">
+                                <button onclick="clearTexture('metalnessMap')" class="btn btn-xs btn-outline w-full">清除</button>
+                            </div>
+                        </div>
+                        <input type="range" id="metallic" min="0" max="1" step="0.01" value="0" class="range range-primary range-xs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">進階材質</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-3 pt-2">
+                        <label class="label py-1"><span class="label-text text-xs">Normal Map</span></label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <div id="preview-normalMap" class="w-16 h-16 border-2 border-dashed border-base-content/20 rounded bg-base-200 flex items-center justify-center overflow-hidden shrink-0 text-xs text-base-content/50"><span>無</span></div>
+                            <div class="flex flex-col gap-1 flex-1">
+                                <input type="file" id="normalMap" accept="image/*" class="file-input file-input-bordered file-input-xs w-full">
+                                <button onclick="clearTexture('normalMap')" class="btn btn-xs btn-outline w-full">清除</button>
+                            </div>
+                        </div>
+                        <label class="label py-1"><span class="label-text text-xs">Normal Scale</span><span class="label-text-alt text-primary" id="normalScaleVal">1.0</span></label>
+                        <input type="range" id="normalScale" min="0" max="2" step="0.1" value="1" class="range range-primary range-xs">
+                    </div>
+
+                    <div class="form-control w-full mb-3">
+                        <label class="label py-1"><span class="label-text text-xs">Ambient Occlusion (UV2)</span></label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <div id="preview-aoMap" class="w-16 h-16 border-2 border-dashed border-base-content/20 rounded bg-base-200 flex items-center justify-center overflow-hidden shrink-0 text-xs text-base-content/50"><span>無</span></div>
+                            <div class="flex flex-col gap-1 flex-1">
+                                <input type="file" id="aoMap" accept="image/*" class="file-input file-input-bordered file-input-xs w-full">
+                                <button onclick="clearTexture('aoMap')" class="btn btn-xs btn-outline w-full">清除</button>
+                            </div>
+                        </div>
+                        <label class="label py-1"><span class="label-text text-xs">AO Intensity</span><span class="label-text-alt text-primary" id="aoIntensityVal">1.0</span></label>
+                        <input type="range" id="aoIntensity" min="0" max="2" step="0.1" value="1" class="range range-primary range-xs">
+                    </div>
+
+                    <div class="form-control w-full mb-3">
+                        <label class="label py-1"><span class="label-text text-xs">Lightmap (UV2)</span></label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <div id="preview-lightMap" class="w-16 h-16 border-2 border-dashed border-base-content/20 rounded bg-base-200 flex items-center justify-center overflow-hidden shrink-0 text-xs text-base-content/50"><span>無</span></div>
+                            <div class="flex flex-col gap-1 flex-1">
+                                <input type="file" id="lightMap" accept="image/*" class="file-input file-input-bordered file-input-xs w-full">
+                                <button onclick="clearTexture('lightMap')" class="btn btn-xs btn-outline w-full">清除</button>
+                            </div>
+                        </div>
+                        <label class="label py-1"><span class="label-text text-xs">Lightmap Intensity</span><span class="label-text-alt text-primary" id="lightMapIntensityVal">1.0</span></label>
+                        <input type="range" id="lightMapIntensity" min="0" max="2" step="0.1" value="1" class="range range-primary range-xs">
+                    </div>
+
+                    <div class="form-control w-full">
+                        <label class="label py-1"><span class="label-text text-xs">Emission</span></label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <div id="preview-emissiveMap" class="w-16 h-16 border-2 border-dashed border-base-content/20 rounded bg-base-200 flex items-center justify-center overflow-hidden shrink-0 text-xs text-base-content/50"><span>無</span></div>
+                            <div class="flex flex-col gap-1 flex-1">
+                                <input type="file" id="emissiveMap" accept="image/*" class="file-input file-input-bordered file-input-xs w-full">
+                                <button onclick="clearTexture('emissiveMap')" class="btn btn-xs btn-outline w-full">清除</button>
+                            </div>
+                        </div>
+                        <input type="color" id="emissiveColor" value="#000000" class="input input-bordered p-0 h-8 w-full cursor-pointer mb-2">
+                        <label class="label py-1"><span class="label-text text-xs">Emission Intensity</span><span class="label-text-alt text-primary" id="emissiveIntensityVal">1.0</span></label>
+                        <input type="range" id="emissiveIntensity" min="0" max="5" step="0.1" value="1" class="range range-primary range-xs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">特殊效果</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-3 pt-2">
+                        <label class="label py-1"><span class="label-text text-xs">Sheen</span><span class="label-text-alt text-primary" id="sheenVal">0.0</span></label>
+                        <input type="range" id="sheen" min="0" max="1" step="0.01" value="0" class="range range-primary range-xs mb-2">
+                        <input type="color" id="sheenColor" value="#ffffff" class="input input-bordered p-0 h-8 w-full cursor-pointer mb-2">
+                        <label class="label py-1"><span class="label-text text-xs">Sheen Roughness</span><span class="label-text-alt text-primary" id="sheenRoughnessVal">1.0</span></label>
+                        <input type="range" id="sheenRoughness" min="0" max="1" step="0.01" value="1" class="range range-primary range-xs">
+                    </div>
+
+                    <div class="form-control w-full mb-3">
+                        <label class="label py-1"><span class="label-text text-xs">Clear Coat</span><span class="label-text-alt text-primary" id="clearcoatVal">0.0</span></label>
+                        <input type="range" id="clearcoat" min="0" max="1" step="0.01" value="0" class="range range-primary range-xs mb-2">
+                        <label class="label py-1"><span class="label-text text-xs">Clear Coat Roughness</span><span class="label-text-alt text-primary" id="clearcoatRoughnessVal">0.0</span></label>
+                        <input type="range" id="clearcoatRoughness" min="0" max="1" step="0.01" value="0" class="range range-primary range-xs">
+                    </div>
+
+                    <div class="form-control w-full mb-3">
+                        <label class="label py-1"><span class="label-text text-xs">Anisotropy（各向異性強度）</span><span class="label-text-alt text-primary" id="anisotropyVal">0.0</span></label>
+                        <input type="range" id="anisotropy" min="0" max="1" step="0.01" value="0" class="range range-primary range-xs">
+                    </div>
+
+                    <div class="form-control w-full mb-3">
+                        <label class="label py-1"><span class="label-text text-xs">Anisotropy Rotation（各向異性旋轉）</span><span class="label-text-alt text-primary" id="anisotropyRotationVal">0°</span></label>
+                        <input type="range" id="anisotropyRotation" min="0" max="360" step="1" value="0" class="range range-primary range-xs">
+                    </div>
+
+                    <div class="form-control w-full">
+                        <label class="label py-1"><span class="label-text text-xs">Anisotropy Pattern（圖案類型）</span></label>
+                        <select id="anisotropyPattern" class="select select-bordered select-xs w-full">
+                            <option value="linear">線性拉絲（Linear Brushed）</option>
+                            <option value="radial">放射拉絲（Radial Brushed）</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">透明與折射 (Transmission)</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-2 pt-2">
+                        <label class="label py-1"><span class="label-text text-xs">Opacity (透明度)</span><span class="label-text-alt text-primary" id="opacityVal">1.0</span></label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <div id="preview-alphaMap" class="w-16 h-16 border-2 border-dashed border-base-content/20 rounded bg-base-200 flex items-center justify-center overflow-hidden shrink-0 text-xs text-base-content/50"><span>無</span></div>
+                            <div class="flex flex-col gap-1 flex-1">
+                                <input type="file" id="alphaMap" accept="image/*" class="file-input file-input-bordered file-input-xs w-full">
+                                <button onclick="clearTexture('alphaMap')" class="btn btn-xs btn-outline w-full">清除</button>
+                            </div>
+                        </div>
+                        <input type="range" id="opacity" min="0" max="1" step="0.01" value="1.0" class="range range-primary range-xs">
+                    </div>
+                    <div class="form-control w-full mb-2">
+                        <label class="label py-1"><span class="label-text text-xs">IOR (折射率)</span><span class="label-text-alt text-primary" id="iorVal">1.0</span></label>
+                        <input type="range" id="ior" min="1.0" max="2.333" step="0.01" value="1.0" class="range range-primary range-xs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">次表面散射 (SSS)</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-2 pt-2 hidden">
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="sssEnabled" class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">啟用 SSS (自動設定透光與厚度)</span>
+                        </label>
+                    </div>
+                    <div class="form-control w-full mb-2">
+                        <label class="label py-1"><span class="label-text text-xs">透光強度 (Translucency)</span><span class="label-text-alt text-primary" id="sssTransmissionVal">0.0</span></label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <div id="preview-transmissionMap" class="w-16 h-16 border-2 border-dashed border-base-content/20 rounded bg-base-200 flex items-center justify-center overflow-hidden shrink-0 text-xs text-base-content/50"><span>無</span></div>
+                            <div class="flex flex-col gap-1 flex-1">
+                                <input type="file" id="transmissionMap" accept="image/*" class="file-input file-input-bordered file-input-xs w-full">
+                                <button onclick="clearTexture('transmissionMap')" class="btn btn-xs btn-outline w-full">清除</button>
+                            </div>
+                        </div>
+                        <input type="range" id="sssTransmission" min="0" max="1" step="0.01" value="0" class="range range-primary range-xs">
+                        <div class="text-[10px] text-warning/80 px-1 pt-1">⚠️ Base Color 若為全黑，SSS 將無效果</div>
+                    </div>
+                    <div class="form-control w-full mb-2 pt-2 hidden">
+                        <label class="label py-1"><span class="label-text text-xs">厚度 (Thickness)</span><span class="label-text-alt text-primary" id="sssThicknessVal">0.0</span></label>
+                        <input type="range" id="sssThickness" min="0" max="500" step="0.1" value="0" class="range range-primary range-xs">
+                    </div>
+                    <div class="form-control w-full mb-2 hidden">
+                        <label class="label py-1"><span class="label-text text-xs">散射距離 (Scatter Distance)</span><span class="label-text-alt text-primary" id="sssAttenuationDistanceVal">0.0</span></label>
+                        <input type="range" id="sssAttenuationDistance" min="0.1" max="500" step="0.1" value="1.0" class="range range-primary range-xs">
+                    </div>
+                    <div class="form-control w-full mb-2 hidden">
+                        <label class="label py-1"><span class="label-text text-xs">散射顏色 (Scatter Color)</span></label>
+                        <input type="color" id="sssAttenuationColor" value="#ffffff" class="input input-bordered p-0 h-8 w-full cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">燈光控制</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-3 pt-2">
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="showLightHelpers" class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">顯示燈光位置</span>
+                        </label>
+                    </div>
+                   
+                    <!-- 主光源 (Top) -->
+                    <div class="form-control w-full mb-2">
+                        <div class="font-bold text-xs mb-2">主光源 (Top Light)</div>
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="topLightEnabled" checked class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">啟用</span>
+                        </label>
+                    </div>
+                    <div id="topLightControls" class="space-y-2">
+                        <label class="label py-1"><span class="label-text text-xs">Position X</span><span class="label-text-alt text-primary" id="topLightPosXVal">0</span></label>
+                        <input type="range" id="topLightPosX" min="-100" max="100" step="0.1" value="0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Position Y</span><span class="label-text-alt text-primary" id="topLightPosYVal">100.0</span></label>
+                        <input type="range" id="topLightPosY" min="0" max="200" step="0.1" value="100.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Position Z</span><span class="label-text-alt text-primary" id="topLightPosZVal">0</span></label>
+                        <input type="range" id="topLightPosZ" min="-100" max="100" step="0.1" value="0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation X</span><span class="label-text-alt text-primary" id="topLightRotXVal">-90°</span></label>
+                        <input type="range" id="topLightRotX" min="-180" max="180" step="1" value="-90" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation Y</span><span class="label-text-alt text-primary" id="topLightRotYVal">0°</span></label>
+                        <input type="range" id="topLightRotY" min="-180" max="180" step="1" value="0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation Z</span><span class="label-text-alt text-primary" id="topLightRotZVal">0°</span></label>
+                        <input type="range" id="topLightRotZ" min="-180" max="180" step="1" value="0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">顏色</span></label>
+                        <input type="color" id="topLightColor" value="#ffffff" class="input input-bordered p-0 h-8 w-full cursor-pointer">
+                        <label class="label py-1"><span class="label-text text-xs">亮度</span><span class="label-text-alt text-primary" id="topLightIntensityVal">1.0</span></label>
+                        <input type="range" id="topLightIntensity" min="0" max="10" step="0.1" value="1.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">燈光寬度</span><span class="label-text-alt text-primary" id="topLightWidthVal">80.0</span></label>
+                        <input type="range" id="topLightWidth" min="1" max="100" step="0.5" value="80" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">燈光高度</span><span class="label-text-alt text-primary" id="topLightHeightVal">80.0</span></label>
+                        <input type="range" id="topLightHeight" min="1" max="100" step="0.5" value="80" class="range range-primary range-xs">
+                    </div>
+                    
+                    <!-- 左側光源 -->
+                    <div class="form-control w-full mt-5 mb-2">
+                        <div class="font-bold text-xs mb-2">左側光源 (Left Light)</div>
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="leftLightEnabled" checked class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">啟用</span>
+                        </label>
+                    </div>
+                    <div id="leftLightControls" class="space-y-2">
+                        <label class="label py-1"><span class="label-text text-xs">Position X</span><span class="label-text-alt text-primary" id="leftLightPosXVal">40.0</span></label>
+                        <input type="range" id="leftLightPosX" min="-100" max="100" step="0.1" value="40.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Position Y</span><span class="label-text-alt text-primary" id="leftLightPosYVal">40.0</span></label>
+                        <input type="range" id="leftLightPosY" min="0" max="100" step="0.1" value="40.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Position Z</span><span class="label-text-alt text-primary" id="leftLightPosZVal">40.0</span></label>
+                        <input type="range" id="leftLightPosZ" min="-100" max="100" step="0.1" value="40.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation X</span><span class="label-text-alt text-primary" id="leftLightRotXVal">-45°</span></label>
+                        <input type="range" id="leftLightRotX" min="-180" max="180" step="1" value="-45" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation Y</span><span class="label-text-alt text-primary" id="leftLightRotYVal">45°</span></label>
+                        <input type="range" id="leftLightRotY" min="-180" max="180" step="1" value="45" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation Z</span><span class="label-text-alt text-primary" id="leftLightRotZVal">0°</span></label>
+                        <input type="range" id="leftLightRotZ" min="-180" max="180" step="1" value="0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">顏色</span></label>
+                        <input type="color" id="leftLightColor" value="#ffffff" class="input input-bordered p-0 h-8 w-full cursor-pointer">
+                        <label class="label py-1"><span class="label-text text-xs">亮度</span><span class="label-text-alt text-primary" id="leftLightIntensityVal">3.0</span></label>
+                        <input type="range" id="leftLightIntensity" min="0" max="10" step="0.1" value="3.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">燈光寬度</span><span class="label-text-alt text-primary" id="leftLightWidthVal">20.0</span></label>
+                        <input type="range" id="leftLightWidth" min="1" max="50" step="0.5" value="20" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">燈光高度</span><span class="label-text-alt text-primary" id="leftLightHeightVal">20.0</span></label>
+                        <input type="range" id="leftLightHeight" min="1" max="50" step="0.5" value="20" class="range range-primary range-xs">
+                    </div>
+                    
+                    <!-- 右側光源 -->
+                    <div class="form-control w-full mt-5 mb-2">
+                        <div class="font-bold text-xs mb-2">右側光源 (Right Light)</div>
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="rightLightEnabled" checked class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">啟用</span>
+                        </label>
+                    </div>
+                    <div id="rightLightControls" class="space-y-2">
+                        <label class="label py-1"><span class="label-text text-xs">Position X</span><span class="label-text-alt text-primary" id="rightLightPosXVal">40.0</span></label>
+                        <input type="range" id="rightLightPosX" min="-100" max="100" step="0.1" value="40.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Position Y</span><span class="label-text-alt text-primary" id="rightLightPosYVal">20.0</span></label>
+                        <input type="range" id="rightLightPosY" min="0" max="100" step="0.1" value="20.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Position Z</span><span class="label-text-alt text-primary" id="rightLightPosZVal">-40.0</span></label>
+                        <input type="range" id="rightLightPosZ" min="-100" max="100" step="0.1" value="-40.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation X</span><span class="label-text-alt text-primary" id="rightLightRotXVal">-45°</span></label>
+                        <input type="range" id="rightLightRotX" min="-180" max="180" step="1" value="-45" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation Y</span><span class="label-text-alt text-primary" id="rightLightRotYVal">-135°</span></label>
+                        <input type="range" id="rightLightRotY" min="-180" max="180" step="1" value="-135" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation Z</span><span class="label-text-alt text-primary" id="rightLightRotZVal">0°</span></label>
+                        <input type="range" id="rightLightRotZ" min="-180" max="180" step="1" value="0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">顏色</span></label>
+                        <input type="color" id="rightLightColor" value="#ffffff" class="input input-bordered p-0 h-8 w-full cursor-pointer">
+                        <label class="label py-1"><span class="label-text text-xs">亮度</span><span class="label-text-alt text-primary" id="rightLightIntensityVal">2.5</span></label>
+                        <input type="range" id="rightLightIntensity" min="0" max="10" step="0.1" value="2.5" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">燈光寬度</span><span class="label-text-alt text-primary" id="rightLightWidthVal">20.0</span></label>
+                        <input type="range" id="rightLightWidth" min="1" max="50" step="0.5" value="20" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">燈光高度</span><span class="label-text-alt text-primary" id="rightLightHeightVal">20.0</span></label>
+                        <input type="range" id="rightLightHeight" min="1" max="50" step="0.5" value="20" class="range range-primary range-xs">
+                    </div>
+                    
+                    <!-- 副光源 -->
+                    <div class="form-control w-full mt-5 mb-2">
+                        <div class="font-bold text-xs mb-2">副光源 (Sub Light)</div>
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="subLightEnabled" checked class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">啟用</span>
+                        </label>
+                    </div>
+                    <div id="subLightControls" class="space-y-2">
+                        <label class="label py-1"><span class="label-text text-xs">Position X</span><span class="label-text-alt text-primary" id="subLightPosXVal">-50.0</span></label>
+                        <input type="range" id="subLightPosX" min="-100" max="100" step="0.1" value="-50.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Position Y</span><span class="label-text-alt text-primary" id="subLightPosYVal">30.0</span></label>
+                        <input type="range" id="subLightPosY" min="0" max="100" step="0.1" value="30.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Position Z</span><span class="label-text-alt text-primary" id="subLightPosZVal">0</span></label>
+                        <input type="range" id="subLightPosZ" min="-100" max="100" step="0.1" value="0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation X</span><span class="label-text-alt text-primary" id="subLightRotXVal">-45°</span></label>
+                        <input type="range" id="subLightRotX" min="-180" max="180" step="1" value="-45" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation Y</span><span class="label-text-alt text-primary" id="subLightRotYVal">0°</span></label>
+                        <input type="range" id="subLightRotY" min="-180" max="180" step="1" value="0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">Rotation Z</span><span class="label-text-alt text-primary" id="subLightRotZVal">0°</span></label>
+                        <input type="range" id="subLightRotZ" min="-180" max="180" step="1" value="0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">顏色</span></label>
+                        <input type="color" id="subLightColor" value="#ffffff" class="input input-bordered p-0 h-8 w-full cursor-pointer">
+                        <label class="label py-1"><span class="label-text text-xs">亮度</span><span class="label-text-alt text-primary" id="subLightIntensityVal">2.0</span></label>
+                        <input type="range" id="subLightIntensity" min="0" max="10" step="0.1" value="2.0" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">燈光寬度</span><span class="label-text-alt text-primary" id="subLightWidthVal">10.0</span></label>
+                        <input type="range" id="subLightWidth" min="1" max="50" step="0.5" value="10" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">燈光高度</span><span class="label-text-alt text-primary" id="subLightHeightVal">40.0</span></label>
+                        <input type="range" id="subLightHeight" min="1" max="50" step="0.5" value="40" class="range range-primary range-xs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">HDR 環境光</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-2 pt-2">
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="hdrEnabled" checked class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">啟用 HDR</span>
+                        </label>
+                    </div>
+                    <div id="hdrControls" class="space-y-2">
+                        <select id="hdriSelect" class="select select-bordered select-xs w-full">
+                            <option value="gradient">漸層天空（預設）</option>
+                            <option value="studio">攝影棚（Studio）</option>
+                            <option value="outdoor">戶外（Outdoor）</option>
+                            <option value="sunset">日落（Sunset）</option>
+                        </select>
+                        <label class="label py-1"><span class="label-text text-xs">HDR 強度</span><span class="label-text-alt text-primary" id="hdrIntensityVal">1.0</span></label>
+                        <input type="range" id="hdrIntensity" min="0" max="10" step="0.1" value="1" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">天空顏色</span></label>
+                        <input type="color" id="hdrSkyColor" value="#87ceeb" class="input input-bordered p-0 h-8 w-full cursor-pointer">
+                        <label class="label py-1"><span class="label-text text-xs">地面顏色</span></label>
+                        <input type="color" id="hdrGroundColor" value="#543210" class="input input-bordered p-0 h-8 w-full cursor-pointer">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">陰影設定</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-2 pt-2">
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="shadowsEnabled" class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">啟用陰影</span>
+                        </label>
+                    </div>
+                    <div id="shadowControls" class="space-y-2">
+                        <label class="label py-1"><span class="label-text text-xs">陰影品質</span></label>
+                        <select id="shadowQuality" class="select select-bordered select-xs w-full">
+                            <option value="low" selected>低（1024）</option>
+                            <option value="medium">中（2048）</option>
+                            <option value="high">高（4096）</option>
+                        </select>
+                        <label class="label py-1"><span class="label-text text-xs">陰影柔和度</span><span class="label-text-alt text-primary" id="shadowSoftnessVal">3</span></label>
+                        <input type="range" id="shadowSoftness" min="1" max="10" step="1" value="3" class="range range-primary range-xs">
+                        <label class="label py-1"><span class="label-text text-xs">陰影濃度</span><span class="label-text-alt text-primary" id="shadowOpacityVal">0.8</span></label>
+                        <input type="range" id="shadowOpacity" min="0" max="1" step="0.01" value="0.8" class="range range-primary range-xs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">渲染與色調 (Render)</div>
+                <div class="collapse-content">
+                    <div class="form-control w-full mb-2 pt-2">
+                        <label class="label py-1"><span class="label-text text-xs">Tone Mapping</span></label>
+                        <select id="toneMapping" class="select select-bordered select-xs w-full">
+                            <option value="aces" selected>ACES Filmic (UE5 Default)</option>
+                            <option value="agx">AgX (Neutral)</option>
+                            <option value="reinhard">Reinhard</option>
+                            <option value="cineon">Cineon</option>
+                            <option value="linear">Linear (None)</option>
+                        </select>
+                    </div>
+                    <div class="form-control w-full mb-2">
+                        <label class="label py-1"><span class="label-text text-xs">曝光度 (Exposure)</span><span class="label-text-alt text-primary" id="exposureVal">1.0</span></label>
+                        <input type="range" id="exposure" min="0.1" max="5" step="0.1" value="1.0" class="range range-primary range-xs">
+                    </div>
+                    <div class="form-control w-full mb-2">
+                        <label class="label py-1"><span class="label-text text-xs">對比度 (Contrast)</span><span class="label-text-alt text-primary" id="contrastVal">1.0</span></label>
+                        <input type="range" id="contrast" min="0.5" max="1.5" step="0.05" value="1.0" class="range range-primary range-xs">
+                    </div>
+                    <div class="form-control w-full mb-2">
+                        <label class="label py-1"><span class="label-text text-xs">飽和度 (Saturation)</span><span class="label-text-alt text-primary" id="saturationVal">1.0</span></label>
+                        <input type="range" id="saturation" min="0" max="2" step="0.1" value="1.0" class="range range-primary range-xs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">後期處理</div>
+                <div class="collapse-content">
+                    <!-- AO (Restored) -->
+                    <div class="form-control w-full mb-2 pt-2">
+                        <div class="font-bold text-xs mb-2">環境遮蔽 (AO)</div>
+                        <label class="label cursor-pointer justify-start gap-2 py-1">
+                            <input type="checkbox" id="aoEnabled" class="checkbox checkbox-primary checkbox-xs">
+                            <span class="label-text text-xs">啟用 AO</span>
+                        </label>
+                    </div>
+                    <div id="aoControls" class="space-y-2 mb-4">
+                        <label class="label py-1"><span class="label-text text-xs">半徑</span><span class="label-text-alt text-primary" id="aoRadiusVal">5</span></label>
+                        <input type="range" id="aoRadius" min="0.1" max="20" step="0.1" value="5" class="range range-primary range-xs">
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- 防止 JS 報錯的隱藏元件 (Placeholder for removed features) -->
+            <div class="hidden">
+                <input type="checkbox" id="groundReflectionEnabled">
+                <input type="range" id="reflectionStrength">
+                <input type="range" id="reflectionFadeStart">
+                <input type="range" id="reflectionFadeEnd">
+                <input type="checkbox" id="vignetteEnabled">
+                <input type="range" id="vignetteOffset">
+                <input type="range" id="vignetteDarkness">
+                <!-- Batch Material Placeholders (Moved here to prevent JS errors) -->
+                <input type="checkbox" id="enableBatchColor">
+                <div id="batchColorControls"></div>
+                <input type="color" id="batchColor">
+                <select id="batchBlendMode"></select>
+                <input type="range" id="batchOpacity">
+                <input type="range" id="batchRoughness">
+                <input type="range" id="batchNormalScale">
+                <input type="checkbox" id="enableBatchPreview">
+                <button id="resetBatchBtn"></button>
+            </div>
+
+        </aside>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module" src="./js/main.js"></script>
+</body>
+</html>
