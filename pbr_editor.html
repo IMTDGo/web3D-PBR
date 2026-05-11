@@ -582,6 +582,26 @@
                 </div>
             </div>
 
+            <!-- ═══════════════════════════════════════════════════ -->
+            <!-- 匯出 GLB                                         -->
+            <!-- ═══════════════════════════════════════════════════ -->
+            <div class="collapse collapse-arrow bg-base-100 shadow-sm mb-2 rounded-box">
+                <input type="checkbox" checked />
+                <div class="collapse-title text-sm font-bold text-primary uppercase tracking-wide min-h-0 py-3">匯出 GLB (Export)</div>
+                <div class="collapse-content pt-2">
+                    <div class="text-xs text-base-content/60 mb-3 leading-relaxed">
+                        匯出前自動執行：<br>
+                        ① <strong>固定貼圖</strong>：四方連續、改色烘焙進貼圖<br>
+                        ② <strong>UV 座標反算</strong>：UV 縮放反算回 UV Shell<br>
+                        ③ <strong>完整 PBR 打包</strong>：sheen、clearcoat、SSS 等
+                    </div>
+                    <button id="exportGLBBtn" class="btn btn-primary btn-sm w-full">
+                        ⬇ 匯出為 GLB
+                    </button>
+                    <div id="glbExportStatus" class="text-xs text-center mt-2 text-primary min-h-[1.2em] leading-relaxed"></div>
+                </div>
+            </div>
+
             <!-- 防止 JS 報錯的隱藏元件 (Placeholder for removed features) -->
             <div class="hidden">
                 <input type="checkbox" id="groundReflectionEnabled">

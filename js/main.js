@@ -9,6 +9,7 @@ import { setupLoaderUIEvents } from './loader.js';
 import { setupUVEditorEvents } from './uv-editor.js';
 import { onWindowResize } from './utils.js';
 import { setupSSSEvents } from './SSSManager.js';
+import { setupGLBExportEvents } from './glb-exporter.js';
 
 function init() {
     appState.scene = new THREE.Scene();
@@ -78,6 +79,7 @@ function setupEventListeners() {
     setupLightUIEvents();
     setupPostProcessingUIEvents();
     setupSSSEvents();
+    setupGLBExportEvents();
     
     appState.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('resize', onWindowResize);
